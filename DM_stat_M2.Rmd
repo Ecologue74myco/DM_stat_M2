@@ -1,12 +1,30 @@
 DM de statistiques noté
 Adapté d’après les travaux de S. Ibanez
+
 Réalisé par Chabardès Océane, Coussedière Margot et Lezebot Erwan
 
 Les données à étudier : 
 Le jeu de données correspond à un projet de recherche sur la fécondité des isards (Rupicapra pyrenaica) femelles dans le Massif des Pyrénées, à Cauterets. Chaque année, une femelle donne naissance au maximum à un petit. On peut donc distinguer la fécondité annuelle (0/1 petit) de la fécondité totale, intégrée sur l’ensemble de la vie de l’individu. Vous trouverez ci-dessous une brève description des colonnes du jeu de données.
 
 ```{r, echo=FALSE, out.width="80%", fig.align="center"}
-knitr::include_graphics("tableau.png")
+load("/Users/oceanechabardes/Desktop/Cours - M1/S9/Outil901/Stats_Leonard/exo_1erNOV/DM_stats_Leonard/cham2.Rdata")
+cham <- cham2
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(emmeans)
+library(partR2)
+library(lme4)
+library(lmerTest)
+library(performance)
+library(MuMIn)
+library(tibble)
+library(car)
+library(patchwork)
+library(DHARMa)
+
+knitr::include_graphics("/Users/oceanechabardes/Desktop/Cours - M1/S9/Outil901/Stats_Leonard/exo_1erNOV/DM_stats_Leonard/tableau.png")
 ```
 
 On s’intéresse à plusieurs questions classiques en biologie animale et en démographie, à savoir :
@@ -18,55 +36,29 @@ Q2. La fécondité annuelle de l’ensemble de l’échantillon varie-t-elle ave
 Q3. Existe-t-il un lien entre la longévité des animaux et leur fécondité totale ? On pourrait supposer que plus une femelle isard vit longtemps, plus elle a « le temps » d’avoir de nombreux petits.
 
 ======================================================================================
-Q1. Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées.
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(include = FALSE)
-load("cham2.Rdata")
-cham <- cham2
-View(cham)
-head(cham)
-
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-library(emmeans) #contrastes de glm
-library(partR2) #R2 pour les glm
-library(lme4) #modèle mixte
-library(lmerTest) #modele mixte
-library(performance) #test d'hypothese sur les modèles
-library(MuMIn)
-library(tibble)
-library(car)
-library(patchwork)
-library(DHARMa)
-```
+Q1. Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? 
+(Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées).
+-----------------------------------------------------------------------
 
 ```{r}
-install.packages("usethis")
-library(usethis)
-usethis::use_git_config(
-  user.name = "Votre Nom",
-  user.email = "votre.email@exemple.com"
-)
-usethis::create_github_token()
+hist(cham$fec)
+hist(cham$age)
+summary(cham)
 ```
 
-======================================================================
-Q1 : Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? 
------------------------------------------------------------------------
-(Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées)
------------------------------------------------------------------------
-
-On sait que l'âge correspond à l'année d’observation moins l'année de naissance : age = year - coh
-
-D'abord, il nous faut donc calculer l'âge : 
+D'abord, on sait que l'âge correspond à l'année d’observation auquel on soustrait l'année de naissance : age = year - coh
 ```{r}
 d <- cham %>% mutate(age = year - coh) %>% filter(!is.na(age), !is.na(fec))
 names(d)
 ```
 
-La fécondité (fec) est binaire (0/1). Sa moyenne à un âge donnée est donc la proportion de 1, c’est-à-dire la proportion d’observations ayant donné lieu à une mise bas à cet âge.
-Pour pouvoir observer si il y a une relation entre l'âge et la fécondité et donc évaluer une tendance, il faut aggréger les données par âge, avec l’effectif (n), la proportion de mises bas (fec_moy) et son intervalle de confiance à 95 % (Clopper-Pearson). 
+
+
+La fécondité (fec) est binaire (0/1), c'est ce qui est représenté avec l'histogramme ci-dessus. 
+
+Sa moyenne à un âge donnée est donc la proportion de 1, c’est-à-dire la proportion d’observations ayant donné lieu à une mise bas à cet âge.
+
+Pour pouvoir observer si il y a une relation entre l'âge et la fécondité et donc évaluer une tendance, il faut aggréger les données par âge, avec l’effectif (n), la proportion de d’observations ayant donné lieu à une mise bas à cet âge (fec_moy) et son intervalle de confiance à 95 % (Clopper-Pearson). 
 
 ```{r}
 resume_IC <- d %>%
@@ -79,24 +71,6 @@ resume_IC <- d %>%
   )
 resume_IC
 ```
-
-Il faut noter qu'une même femelle est suivie plusieurs années. Elle peut donc avoir mis bas à plusieurs âges différents et apparaît dans plusieurs lignes de resume_IC, mais une seule fois par âge, puisque son âge change chaque année. 
-
-Au sein d’un âge donné, les observations proviennent donc de femelles distinctes, et l’IC par âge est valide pour décrire chaque point. En revanche, les points de différents âges ne sont pas indépendants : ce sont en partie les mêmes femelles. Ce tableau décrit donc les données mais ne permet pas de tester l’effet de l’âge.
-
-
-
-
-
-
-
-
-
-donc on utilise un modèle logistique (binomial).
-Ce qu’on modélise, c’est la probabilité de mise bas, notée p, qui est bornée entre 0 et 1.
-p = β0 + β1 × age
-
-Ensuite, il faut regarder la fécondité moyennée par l'âge
 ```{r}
 
 ggplot(d, aes(x = age, y = fec)) +
@@ -106,6 +80,30 @@ ggplot(d, aes(x = age, y = fec)) +
               formula = y ~ poly(x, 2), se = TRUE) +
   labs(x = "Âge (années)", y = "Probabilité de mise bas")
 ```
+
+
+On notera qu'une même femelle est suivie plusieurs années. Elle peut donc avoir mis bas à plusieurs âges différents et apparaître dans plusieurs lignes de resume_IC, mais une seule fois par âge, puisque son âge change chaque année. 
+
+Au sein d’un âge donné, les observations proviennent donc de femelles distinctes, et l’IC par âge est valide pour décrire chaque point. 
+
+En revanche, les points de différents âges ne sont pas indépendants : ce sont en partie les mêmes femelles (pseudo-replicabilité). 
+
+Le tableau, ci-dessus, décrit donc les données, mais ne permet pas de tester l’effet de l’âge.
+Ce qu’on modélise, c’est la probabilité de mise bas, notée p, qui est bornée entre 0 et 1.
+p = β0 + β1 × age
+
+
+
+
+
+
+
+
+donc on utilise un modèle logistique (binomial).
+
+
+Ensuite, il faut regarder la fécondité moyennée par l'âge
+
 Ce graphique nous montre qu'il existe une relation non linéaire entre fécondité et âge. 
 
 Sachant qu'en termes biologique, la fécondité varie souvent de façon non linéaire avec l’âge (hausse chez les jeunes, plateau, puis sénescence), donc il faudrait tester un terme quadratique.
@@ -135,7 +133,7 @@ Donc en conclusion une ligne par femelle avec fécondité totale = somme des fec
 
 Ici, l'IA a aidé pour comment bien utiliser la fonction group_by par rapport à la problématique énoncée plus haut
 
-```{r setup, include=FALSE}
+```{r}
 fem <- cham %>%
   group_by(id) %>%
   summarise(fec_tot = sum(fec), n_obs = n(),
