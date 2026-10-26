@@ -1,0 +1,211 @@
+DM de statistiques noté
+Adapté d’après les travaux de S. Ibanez
+Réalisé par Chabardès Océane, Coussedière Margot et Lezebot Erwan
+
+Les données à étudier : 
+Le jeu de données correspond à un projet de recherche sur la fécondité des isards (Rupicapra pyrenaica) femelles dans le Massif des Pyrénées, à Cauterets. Chaque année, une femelle donne naissance au maximum à un petit. On peut donc distinguer la fécondité annuelle (0/1 petit) de la fécondité totale, intégrée sur l’ensemble de la vie de l’individu. Vous trouverez ci-dessous une brève description des colonnes du jeu de données.
+
+```{r, echo=FALSE, out.width="80%", fig.align="center"}
+knitr::include_graphics("tableau.png")
+```
+
+On s’intéresse à plusieurs questions classiques en biologie animale et en démographie, à savoir :
+
+Q1. Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées.
+
+Q2. La fécondité annuelle de l’ensemble de l’échantillon varie-t-elle avec le temps ? Peut-être qu’au début de l’étude, la population est loin de sa capacité de charge, tandis qu’à la fin de l’étude, elle en est plus proche. Attention cependant au fait que l’âge moyen des isards étudiées puisse varier au cours de l’étude.
+
+Q3. Existe-t-il un lien entre la longévité des animaux et leur fécondité totale ? On pourrait supposer que plus une femelle isard vit longtemps, plus elle a « le temps » d’avoir de nombreux petits.
+
+======================================================================================
+Q1. Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = FALSE)
+load("cham2.Rdata")
+cham <- cham2
+View(cham)
+head(cham)
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(emmeans) #contrastes de glm
+library(partR2) #R2 pour les glm
+library(lme4) #modèle mixte
+library(lmerTest) #modele mixte
+library(performance) #test d'hypothese sur les modèles
+library(MuMIn)
+library(tibble)
+library(car)
+library(patchwork)
+library(DHARMa)
+```
+
+```{r}
+install.packages("usethis")
+library(usethis)
+usethis::use_git_config(
+  user.name = "Votre Nom",
+  user.email = "votre.email@exemple.com"
+)
+usethis::create_github_token()
+```
+
+======================================================================
+Q1 : Existe-t-il un lien entre la fécondité annuelle et l’âge de la femelle ? 
+-----------------------------------------------------------------------
+(Par exemple, on pourrait supposer que les femelles les plus âgées mettent bas moins souvent, mais d’autres « formes » d’hypothèses peuvent être imaginées)
+-----------------------------------------------------------------------
+
+On sait que l'âge correspond à l'année d’observation moins l'année de naissance : age = year - coh
+
+D'abord, il nous faut donc calculer l'âge : 
+```{r}
+d <- cham %>% mutate(age = year - coh) %>% filter(!is.na(age), !is.na(fec))
+names(d)
+```
+
+La fécondité (fec) est binaire (0/1). Sa moyenne à un âge donnée est donc la proportion de 1, c’est-à-dire la proportion d’observations ayant donné lieu à une mise bas à cet âge.
+Pour pouvoir observer si il y a une relation entre l'âge et la fécondité et donc évaluer une tendance, il faut aggréger les données par âge, avec l’effectif (n), la proportion de mises bas (fec_moy) et son intervalle de confiance à 95 % (Clopper-Pearson). 
+
+```{r}
+resume_IC <- d %>%
+  group_by(age) %>%
+  summarise(
+    n       = n(),
+    fec_moy = mean(fec),
+    ic_inf  = binom.test(sum(fec), n())$conf.int[1],
+    ic_sup  = binom.test(sum(fec), n())$conf.int[2]
+  )
+resume_IC
+```
+
+Il faut noter qu'une même femelle est suivie plusieurs années. Elle peut donc avoir mis bas à plusieurs âges différents et apparaît dans plusieurs lignes de resume_IC, mais une seule fois par âge, puisque son âge change chaque année. 
+
+Au sein d’un âge donné, les observations proviennent donc de femelles distinctes, et l’IC par âge est valide pour décrire chaque point. En revanche, les points de différents âges ne sont pas indépendants : ce sont en partie les mêmes femelles. Ce tableau décrit donc les données mais ne permet pas de tester l’effet de l’âge.
+
+
+
+
+
+
+
+
+
+donc on utilise un modèle logistique (binomial).
+Ce qu’on modélise, c’est la probabilité de mise bas, notée p, qui est bornée entre 0 et 1.
+p = β0 + β1 × age
+
+Ensuite, il faut regarder la fécondité moyennée par l'âge
+```{r}
+
+ggplot(d, aes(x = age, y = fec)) +
+  stat_summary_bin(fun = mean, bins = 15, geom = "point") +   # moyennes par classe d'âge
+  geom_smooth(method = "glm",
+              method.args = list(family = binomial),
+              formula = y ~ poly(x, 2), se = TRUE) +
+  labs(x = "Âge (années)", y = "Probabilité de mise bas")
+```
+Ce graphique nous montre qu'il existe une relation non linéaire entre fécondité et âge. 
+
+Sachant qu'en termes biologique, la fécondité varie souvent de façon non linéaire avec l’âge (hausse chez les jeunes, plateau, puis sénescence), donc il faudrait tester un terme quadratique.
+
+À noter que chaque femelle est observée plusieurs années (mesures répétées), il faut donc ajouter un effet aléatoire sur id pour éviter la pseudo-réplication.
+
+
+
+
+======================================================================
+Q3 : Existe-t-il un lien entre la longévité des animaux (long) et leur fécondité totale (fec) ?
+-----------------------------------------------------------------------
+```{r}
+hist(cham$fec)
+hist(cham$long)
+summary(cham)
+```
+H : Plus une femelle isard vit longtemps, plus elle a eu de petits
+
+Sur ce jeu données il y a par exemple, la femelle 101 qui occupe 11 lignes (1998 à 2008), avec fec = 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1. Il y a 356 lignes pour seulement 49 femelles -> pseudo-réplication
+
+Les 11 lignes de la femelle 101 ne sont donc pas 11 individus indépendants (elles viennent du même animal). Elles ont alors la même longévité (13 ans), etc...
+
+Si on lance un modèle sur les 356 lignes, R croirait avoir 356 individus indépendants. Il sous-estimerait alors les erreurs-types et les p-values seraient comme biaisées.
+
+Donc en conclusion une ligne par femelle avec fécondité totale = somme des fec je suppose (les 356 lignes sont des mesures répétées de 49 femelles)
+
+Ici, l'IA a aidé pour comment bien utiliser la fonction group_by par rapport à la problématique énoncée plus haut
+
+```{r setup, include=FALSE}
+fem <- cham %>%
+  group_by(id) %>%
+  summarise(fec_tot = sum(fec), n_obs = n(),
+            long = first(long), coh = first(coh), .groups = "drop") # IA
+
+summary(fem)
+hist(fem$fec_tot)          
+```
+
+```{r}
+#Essai 1 : modèle linéaire (lm)
+m_lm <- lm(fec_tot ~ long, data = fem)
+plot(simulateResiduals(m_lm))          #Pas de soucis détectés
+
+```
+```{r}
+shapiro.test(residuals(m_lm)) 
+```
+```{r}
+ggplot(fem, aes(long, fec_tot)) +
+  geom_jitter(width = 0.15, height = 0.1) +
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0, linetype = "dashed") # Ici l'IA a aidé à faire une plus belle figure notamment avec les lignes geom_jitter(width = 0.15, height = 0.1) et geom_hline(yintercept = 0, linetype = "dashed") 
+
+```
+p-value = 0.6125 > 0,05 donc le lm est correct statistiquement. Toutefois, pour des comptages il vaut mieux regarder avec la loi de Poisson plutot qu'un lm simple qui prédit des valeurs négatives comme nous le voyons sur la figure ou la droite de régression descend légèrement en dessous de 0 pour une longévité d'environ 2, alors que dans le jeu de données c'est des valeurs entre 0 et 1.
+
+```{r}
+#Essai 2 : GLM de Poisson
+m_pois <- glm(fec_tot ~ long, family = poisson, data = fem)
+DHARMa::simulateResiduals(m_pois) %>% plot()
+```
+```{r}
+check_overdispersion(glm_mix)
+```
+D'apres Dharma le modèle ne colle pas parfaitement. En effet, une ligne = une femelle une année, et fec vaut 0 ou 1. C’est donc binomial (prédire une probabilité entre 0 et 1) car Poisson et quasi-Poisson sont faits pour des comptages sans limites. Ils pourraient donc prédire par exemple 2 ou 3 mises bas par an ce qui est impossible ici au vu du jeu de données.
+
+```{r}
+#Essai 3 : GLM loi Binomial
+glm_mix <- glmer(fec ~ long + (1 | id), family = binomial, data = cham)
+summary(glm_mix)
+DHARMa::simulateResiduals(glm_mix) %>% plot()
+```
+```{r}
+check_overdispersion(glm_mix)
+```
+Comme prévu, ce modèle convient. id est en effet aléatoire car chaque femelle apparaît plusieurs fois dans le tableau et que ces lignes ne sont pas indépendantes
+
+```{r}
+Anova(glm_mix, type = "II")
+```
+p = 0.01337 < 0,05 : Une femelle qui vit plus longtemps a une probabilité plus élevée de mettre bas chaque année
+
+```{r}
+moy2 <- cham %>%
+  group_by(long) %>%
+  summarise(moy = mean(fec), n = n()) #ici l'IA a aidé en rajoutant l'idée de la moyenne car sans moyenne les points ne valent que 0 ou 1, donc ils forment deux lignes horizontales (en bas et en haut) ce que je trouve moins bien visuellement
+
+ggplot(moy2, aes(x = long, y = moy)) +
+  geom_point() +
+  geom_smooth(aes(weight = n), method = "glm", method.args = list(family = binomial),
+              se = TRUE, color = "blue", alpha = 0.3) +
+  labs(x = "Longévité (années)", y = "Proportion d'années avec mise bas")
+
+```
+Conclusion de la question 3 : La fécondité totale augmente fortement avec la longévité (p = 0.01337, tendance significative), ce qui confirme que les femelles qui vivent plus longtemps ont plus de petits.
+
+
+
+
+
+
+
